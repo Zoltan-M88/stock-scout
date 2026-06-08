@@ -1,5 +1,4 @@
 import requests
-import schedule
 import time
 from datetime import datetime
 
@@ -36,6 +35,7 @@ WATCHLIST = [
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML"})
+    time.sleep(1)
 
 
 def fetch_daily(ticker):
@@ -123,20 +123,20 @@ def detect_volume_spike(candles):
 def reversal_score(signals):
     score = 0
     for s in signals:
-        if "Engulfing" in s:    score += 35
-        if "Reversal" in s:     score += 30
-        if "RSI" in s:          score += 20
-        if "Volume" in s:       score += 15
+        if "Engulfing" in s:  score += 35
+        if "Reversal"  in s:  score += 30
+        if "RSI"       in s:  score += 20
+        if "Volume"    in s:  score += 15
     return min(score, 100)
 
 
 def run_daily_report():
-    print(f"[{datetime.now()}] Running daily report...")
-    send_telegram("📋 <b>Stock Scout — Daily Report</b>\n🕙 10:00 PM scan starting...\n")
-    time.sleep(2)
+    print(f"[{datetime.now()}] Starting daily report...")
+    date_str = datetime.now().strftime("%d %b %Y")
 
-    alerts = []
-    no_signal = []
+    send_telegram(f"📋 <b>Stock Scout — Daily Report</b>\n📅 {date_str}\n🕙 Scanning 20 beaten down stocks...\nResults incoming ⏳")
+
+    alerts, clean = [], []
 
     for ticker, name, sector in WATCHLIST:
         try:
@@ -171,50 +171,40 @@ def run_daily_report():
             if signals:
                 alerts.append(entry)
             else:
-                no_signal.append(entry)
+                clean.append(entry)
 
-            print(f"  {ticker}: score={score}, signals={signals}")
-            time.sleep(1.5)   # respect free API rate limit
+            print(f"  {ticker}: score={score} signals={signals}")
+            time.sleep(1.5)
 
         except Exception as e:
             print(f"  {ticker}: error — {e}")
             time.sleep(1.5)
 
-    # ── Send summary ──────────────────────────────────────
-    date_str = datetime.now().strftime("%d %b %Y")
-
+    # Send signals report
     if alerts:
         alerts.sort(key=lambda x: x["score"], reverse=True)
-        msg = f"🔥 <b>Reversal Signals Found — {date_str}</b>\n\n"
+        msg = f"🔥 <b>Reversal Signals — {date_str}</b>\n\n"
         for a in alerts:
             arrow = "📈" if a["chg"] >= 0 else "📉"
-            msg += (
-                f"<b>{a['ticker']}</b> — {a['name']} ({a['sector']})\n"
-                f"{arrow} Close: ${a['close']:.2f}  Change: {a['chg']:+.2f}%\n"
-                f"RSI: {a['rsi'] if a['rsi'] else 'N/A'}  |  Score: {a['score']}/100\n"
-            )
+            msg += f"<b>{a['ticker']}</b> — {a['name']} ({a['sector']})\n"
+            msg += f"{arrow} ${a['close']:.2f}  {a['chg']:+.2f}%  RSI:{a['rsi'] if a['rsi'] else '—'}  Score:{a['score']}/100\n"
             for s in a["signals"]:
                 msg += f"  {s}\n"
             msg += "\n"
         send_telegram(msg)
     else:
-        send_telegram(f"😴 <b>No Reversal Signals — {date_str}</b>\nAll 20 stocks scanned. No patterns detected today.")
+        send_telegram(f"😴 <b>No Signals Today — {date_str}</b>\nAll 20 stocks scanned. No reversal patterns detected.")
 
-    # ── Clean summary of all stocks ───────────────────────
-    all_entries = alerts + no_signal
-    summary = f"📊 <b>Full Watchlist Summary — {date_str}</b>\n\n"
-    for a in all_entries:
+    # Send full watchlist summary
+    all_stocks = alerts + clean
+    summary = f"📊 <b>Full Watchlist — {date_str}</b>\n\n"
+    for a in all_stocks:
         arrow = "🟢" if a["chg"] >= 0 else "🔴"
         summary += f"{arrow} <b>{a['ticker']}</b> ${a['close']:.2f} ({a['chg']:+.2f}%)  RSI:{a['rsi'] if a['rsi'] else '—'}\n"
     send_telegram(summary)
 
-    print(f"[{datetime.now()}] Report done. {len(alerts)} alerts sent.")
+    print(f"[{datetime.now()}] Done. {len(alerts)} signals found.")
 
 
-# ── Scheduler ─────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Stock Scout scheduler started. Waiting for 22:00...")
-    schedule.every().day.at("22:00").do(run_daily_report)
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    run_daily_report()
